@@ -1,0 +1,232 @@
+import 'dart:async';
+import 'package:can_cu_thanh_doan/constants/key_api.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_polyline_points/flutter_polyline_points.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'dart:math' show cos, sqrt, asin;
+import '../../main.dart';
+
+class GoogleMapPage extends StatefulWidget {
+  const GoogleMapPage({Key key, this.lat, this.lng, this.address}) : super(key: key);
+
+  final double lat;
+  final double lng;
+  final String address;
+  @override
+  _GoogleMapPageState createState() => _GoogleMapPageState();
+}
+
+/// Điểm đánh dấu để hiển thị các điểm trên bản đồ
+Map<MarkerId, Marker> markers = {};
+
+
+PolylinePoints polylinePoints = PolylinePoints();
+Map<PolylineId, Polyline> polylines = {};
+
+var _placeDistance;
+
+class _GoogleMapPageState extends State<GoogleMapPage> {
+  /// Google Maps controller
+  final Completer<GoogleMapController> _controller = Completer();
+  /// Định cấu hình vị trí bản đồ và thu phóng
+  static final CameraPosition _kGooglePlex = CameraPosition(
+    target: currentPostion,
+    zoom: 11.5,
+  );
+
+  @override
+  void initState() {
+    /// thêm điểm đánh dấu điểm gốc(vị trí bắt đầu)
+    _addMarker(
+      currentPostion,
+      'Home',
+      BitmapDescriptor.defaultMarker,
+      'Vị trí của tôi'
+    );
+
+    /// Thêm điểm đánh dấu điểm đến(Vị trí kết thúc)
+    _addMarker(
+      LatLng(widget.lat, widget.lng),
+      'Destination',
+      BitmapDescriptor.defaultMarker,
+      widget.address
+    );
+    _getPolyline();
+
+    super.initState();
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+
+        body: SafeArea(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              GoogleMap(
+                mapType: MapType.normal,
+                initialCameraPosition: _kGooglePlex,
+                myLocationEnabled: true,
+                tiltGesturesEnabled: true,
+                compassEnabled: true,
+                scrollGesturesEnabled: true,
+                zoomGesturesEnabled: true,
+                polylines: Set<Polyline>.of(polylines.values),
+                markers: Set<Marker>.of(markers.values),
+                onMapCreated: (GoogleMapController controller) {
+                  _controller.complete(controller);
+                },
+              ),
+            ],
+          ),
+        ),
+    );
+  }
+
+  /// Hiển thị khoảng cách
+  Widget _buildKhoangCach(){
+    return Visibility(
+      visible: _placeDistance == null ? false : true,
+      child: Positioned(
+        bottom: 0,
+        child: Container(
+          height: 70,
+          width: 150,
+          decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.lightGreen[700],
+                  Colors.green[900]
+                ],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.only(
+                topRight: Radius.circular(8),
+                topLeft: Radius.circular(8),
+              )
+          ),
+          padding: EdgeInsets.only(left: 15,bottom: 10,right: 2),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned(
+                top: 2,
+                right: 0,
+                child: GestureDetector(
+                  onTap: (){
+                    setState(() {
+
+                    });
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      color: Colors.red,
+                    ),
+                    height: 15,
+                    width: 15,
+                    child: Icon(Icons.close,size: 14,color: Colors.white,),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 15,right: 13),
+                child: Column(
+                  children: [
+                    Text(
+                      'Khoảng cách',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white
+                      ),
+                    ),
+                    SizedBox(height: 5,),
+                    Text(
+                      '$_placeDistance km',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Phương pháp này sẽ thêm các điểm đánh dấu vào bản đồ dựa trên vị trí LatLng
+  void _addMarker(LatLng position, String id, BitmapDescriptor descriptor, String info) {
+    var markerId = MarkerId(id);
+    var infoWindow = InfoWindow(title: info);
+    var marker =
+    Marker(markerId: markerId, icon: descriptor, position: position,infoWindow: infoWindow);
+    markers[markerId] = marker;
+  }
+
+  // ignore: always_declare_return_types
+  _addPolyLine(List<LatLng> polylineCoordinates) {
+    var id = PolylineId('poly');
+    var polyline = Polyline(
+        polylineId: id,
+        points: polylineCoordinates,
+        width: 8,
+        color: Colors.blue
+    );
+
+    /// Áp dụng công thức để tính khoảng cách đường đi thực tế giữa 2 vị trí
+    var totalDistance = 0.0;
+    for (var i = 0; i < polylineCoordinates.length - 1; i++) {
+      totalDistance += _coordinateDistance(
+        polylineCoordinates[i].latitude,
+        polylineCoordinates[i].longitude,
+        polylineCoordinates[i + 1].latitude,
+        polylineCoordinates[i + 1].longitude,
+      );
+    }
+
+/// Lưu trữ tổng khoảng cách được tính toán của tuyến đường
+    setState(() {
+      _placeDistance = totalDistance.toStringAsFixed(2);
+      print('Khoảng cách: $_placeDistance km');
+    });
+    polylines[id] = polyline;
+  }
+
+
+  /// vẽ đường đi giữa 2 vị trí
+  void _getPolyline() async {
+    var polylineCoordinates = <LatLng>[];
+
+    var result = await polylinePoints.getRouteBetweenCoordinates(
+      KeyAPI.keyAPI,
+        pointLatLng,
+      PointLatLng(widget.lat,widget.lng),
+      travelMode: TravelMode.driving,
+    );
+    if (result.points.isNotEmpty) {
+      result.points.forEach((PointLatLng point) {
+        polylineCoordinates.add(LatLng(point.latitude, point.longitude));
+      });
+    } else {
+      print(result.errorMessage);
+    }
+    _addPolyLine(polylineCoordinates);
+  }
+
+  /// Công thức tính khoảng cách
+  double _coordinateDistance(lat1, lon1, lat2, lon2) {
+    var p = 0.017453292519943295;
+    var c = cos;
+    var a = 0.5 -
+        c((lat2 - lat1) * p) / 2 +
+        c(lat1 * p) * c(lat2 * p) * (1 - c((lon2 - lon1) * p)) / 2;
+    return 12742 * asin(sqrt(a));
+  }
+}
